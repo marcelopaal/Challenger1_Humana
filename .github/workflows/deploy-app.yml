@@ -1,0 +1,111 @@
+# GitHub Actions Workflow for Node.js MongoDB Application
+name: Deploy Node.js MongoDB App
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
+  BACKEND_IMAGE: node-mongo-backend
+  FRONTEND_IMAGE: node-mongo-frontend
+  RESOURCE_GROUP: rg-node-mongo-aks
+  CLUSTER_NAME: aks-node-mongo-cluster
+  NAMESPACE: node-mongo-app
+
+jobs:
+  build-and-push:
+    name: Build and Push Images
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Login to Azure Container Registry
+      run: |
+        az acr login --name ${{ secrets.ACR_NAME }}
+
+    - name: Build and Push Backend Image
+      run: |
+        docker build -t ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:${{ github.sha }} \
+                     -t ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:latest \
+                     ./backend
+        docker push ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+        docker push ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:latest
+
+    - name: Build and Push Frontend Image
+      run: |
+        docker build -t ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:${{ github.sha }} \
+                     -t ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:latest \
+                     ./frontend
+        docker push ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+        docker push ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:latest
+
+  deploy-to-aks:
+    name: Deploy to AKS
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Get AKS Credentials
+      run: |
+        az aks get-credentials --resource-group ${{ env.RESOURCE_GROUP }} --name ${{ env.CLUSTER_NAME }}
+
+    - name: Replace tokens in manifests
+      run: |
+        # Replace image tags in Kubernetes manifests
+        sed -i "s|#{ACR_LOGIN_SERVER}#|${{ secrets.ACR_LOGIN_SERVER }}|g" k8s/*.yaml
+        sed -i "s|#{IMAGE_TAG}#|${{ github.sha }}|g" k8s/*.yaml
+        sed -i "s|#{MONGODB_URI}#|${{ secrets.MONGODB_URI }}|g" k8s/*.yaml
+        sed -i "s|#{JWT_SECRET}#|${{ secrets.JWT_SECRET }}|g" k8s/*.yaml
+
+    - name: Deploy to AKS
+      run: |
+        # Create namespace
+        kubectl apply -f k8s/namespace.yaml
+        
+        # Deploy secrets
+        kubectl apply -f k8s/secrets.yaml
+        
+        # Deploy backend
+        kubectl apply -f k8s/backend-deployment.yaml
+        
+        # Deploy frontend
+        kubectl apply -f k8s/frontend-deployment.yaml
+        
+        # Wait for deployments
+        echo "⏳ Waiting for backend deployment..."
+        kubectl rollout status deployment/backend-deployment -n ${{ env.NAMESPACE }} --timeout=300s
+        
+        echo "⏳ Waiting for frontend deployment..."
+        kubectl rollout status deployment/frontend-deployment -n ${{ env.NAMESPACE }} --timeout=600s
+
+    - name: Get Service Information
+      run: |
+        echo "## 🚀 Node.js MongoDB App Deployed!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🌐 Services:" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        kubectl get services -n ${{ env.NAMESPACE }}
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📋 Pods:" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        kubectl get pods -n ${{ env.NAMESPACE }}
+        echo '```' >> $GITHUB_STEP_SUMMARY
