@@ -29,6 +29,8 @@ RUN addgroup -g 1001 -S nginx
 RUN adduser -S nginx -u 1001
 
 # Change ownership
+RUN chmod +x node_modules/.bin/react-scripts
+
 RUN chown -R nginx:nginx /usr/share/nginx/html
 RUN chown -R nginx:nginx /var/cache/nginx
 RUN chown -R nginx:nginx /var/log/nginx
