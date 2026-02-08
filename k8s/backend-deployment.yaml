@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: backend
-        image: aksnodemongoclusteracrj029o8.azurecr.io/node-mongo-backend:backend-mae
+        image: aksnodemongoclusteracrzvep30.azurecr.io/node-mongo-backend:backend-mae
         ports:
         - containerPort: 3000
         env:
