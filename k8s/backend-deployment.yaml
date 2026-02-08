@@ -22,7 +22,10 @@ spec:
         - containerPort: 3000
         env:
         - name: MONGODB_URI
-          value: "mongodb://usuario:pass@mongo:27017/dbname"
+          valueFrom:
+            secretKeyRef:
+              name: app-secret
+              key: MONGO_URI
         - name: JWT_SECRET
           valueFrom:
             secretKeyRef:
